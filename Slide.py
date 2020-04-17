@@ -79,14 +79,18 @@ class Slide:
     def __init__(self, slide_file, annot_file=None, extraction_level=7):
         self.slide_file = slide_file
         self.annot_file = annot_file
-        self.extraction_level = extraction_level
+        self.getWSI()
+
+        if extraction_level > self.slide.level_count-1:
+            self.extraction_level = self.slide.level_count-1
+        else:
+            self.extraction_level = extraction_level
 
         if annot_file == None:
             self.annotation = None
         else:
-            self.annotation = Annotation(annot_file)
+            self.annotation = Annotation(annot_file, scaleFactor=self.slide.level_downsamples[self.extraction_level])
 
-        self.getWSI()
         
 
     def getWSI(self):
@@ -156,12 +160,40 @@ class Slide:
         if img==None:
             img = self.getRegionFromSlide()
         
-        return cv2.threhold(img, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        img[img==0] = 255
+        mask = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)[1]
+        mask = self.performClose(self.performOpen(mask, kernel_size=5))
+
+        return mask
         
+    def getAnnotationMask(self):
+        if self.annotation == None:
+            return None
+        dims = self.slide.level_dimensions[self.extraction_level]
+        canvas = np.zeros((dims[1], dims[0]), dtype=np.uint8)
+
+        mask = cv2.fillPoly(canvas, self.annotation.coords_list, 255)
+        return mask
+
+    def getAnnotationNeighborhoodMask(self, kernel_size=5):
+        '''
+        Returns a binary mask image with non-zero values around the region of the annotation mask.
+
+        The function perform an XOR operation between the Annotation mask and its Dilated version
+        '''
+        
+        kernel = np.ones((kernel_size,kernel_size), np.uint8)
+
+        annotation_mask = self.getAnnotationMask()
+        annotation_mask_dilated = cv2.dilate(annotation_mask, kernel, iterations=1)
+
+        n_mask = np.logical_xor(annotation_mask, annotation_mask_dilated)
+        return 255*(n_mask.astype(np.uint8))
 
     def getDABMask(self, img=None, margins=(25, -25, 25, -35)):
         '''
-        Returns the bit mask for ROI from the given RGB img, using DAB channel of the HED converted image
+        Returns the bit mask for ROI from the given RGB img, using DAB channel of the HED (deconvoluted) image
         '''
         if img==None:
             img = self.getRegionFromSlide()
@@ -172,12 +204,19 @@ class Slide:
 
         return mask
 
-    def getPatchCoordList(self, thresh_method='HED', from_level=None, with_filename=True):
-        #if from_level==None :
-        #    from_level = self.extraction_level
-        #elif from_level='max' or  from_level > self.slide.level_count-1:
-        #    from_level = self.slide.level_count-1
+    def getPatchCoordList(self, thresh_method='HED', with_filename=True):
+        '''
+        Returns a list of coordinates in the slide image where useful data is expected to be present by using 
+        thresholding to remove blank or non-informative areas, at the given image level (extraction_level)
 
+        This function gets a downsampled version of the slide image at level either the highest level or the one specified in self.extraction_level
+        Then, it applies a thresholding technique, 
+        either 'HED' (DAB channel of the color deconvoluted, rescaled image) or
+                'OTSU' (Otsu thresholded mask) or
+                'N_MASK' (Region around an annotation)
+        depending on the 'thresh_method' value.
+        Following the mask generation, the indices of all values that are non-zero are recorded (with_filename if true) and returned as a list  
+        '''
 
         #img = self.getRegionFromSlide()
         
@@ -185,11 +224,17 @@ class Slide:
         
         if thresh_method == 'HED':
             mask = self.getDABMask()
-        else:
+        elif thresh_method == 'OTSU':
             mask = self.getOtsu()
+        elif thresh_method=='N_MASK':
+            mask = self.getAnnotationNeighborhoodMask()
+
+        if mask==None:
+            print('No annotation object present.')
+            return None
 
         nzs = np.argwhere(mask)
-        nzs = nzs * self.slide.level_downsamples[from_level]
+        nzs = nzs * self.slide.level_downsamples[self.extraction_level]
         nzs = nzs.astype(np.int32)
         nzs = np.flip(nzs, 1)
 
@@ -198,6 +243,6 @@ class Slide:
 
         l = []
         for i in range(nzs.shape[0]):
-            l.append([filename, nzs[i].tolist()])
+            l.append([self.slide_file, nzs[i].tolist()])
 
         return l
