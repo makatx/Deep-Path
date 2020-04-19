@@ -103,12 +103,15 @@ class Slide:
         self.slide = openslide.OpenSlide(self.slide_file)
         
 
-    def getRegionFromSlide(self, start_coord=(0,0), dims='full'):
+    def getRegionFromSlide(self, start_coord=(0,0), dims='full', level=None):
+        if level==None:
+            level = self.extraction_level
+
         if dims == 'full':
-            img = np.array(self.slide.read_region((0,0), self.extraction_level, self.slide.level_dimensions[self.extraction_level]))
+            img = np.array(self.slide.read_region((0,0), level, self.slide.level_dimensions[level]))
             img = img[:,:,:3]
         else:
-            img = np.array(self.slide.read_region(start_coord, self.extraction_level, dims))
+            img = np.array(self.slide.read_region(start_coord, level, dims))
             img = img[:,:,:3]
         
         return img 
@@ -228,18 +231,18 @@ class Slide:
 
         return mask
 
-    def getGTmask(self, coords, dims=(256,256)):
+    def getGTmask(self, coords, dims=(256,256), level=1):
         if self.annotation==None:
             return np.zeros((dims[0], dims[1], 1), dtype=np.uint8)
 
         c_shifted = self.annotation.shift(origin=coords)
-        c_scaled = self.annotation.scale(c_shifted, self.slide.level_downsamples[self.extraction_level])
+        c_scaled = self.annotation.scale(c_shifted, self.slide.level_downsamples[level])
 
         mask = cv2.fillPoly(np.zeros((dims[0], dims[1], 1), dtype=np.uint8), c_scaled, (255))
 
         return mask
 
-    def getLabel(self, coords, dims=(256,256)):
+    def getLabel(self, coords, dims=(256,256), level=1):
         '''
         Return [1.0, 0.0] if the region at the specified rectangulare area (dims) starting at given coordinates (coords) does not have a detection else, 
         return [0.0, 1.0] if the region at the specified rectangulare area (dims) starting at given coordinates (coords) has a detection 
@@ -247,7 +250,7 @@ class Slide:
         if self.annotation==None:
             return np.array([1.0, 0.0])
         else:
-            detection = np.any(self.getGTmask(coords, dims))
+            detection = np.any(self.getGTmask(coords, dims, level))
             label = np.array( [float(not detection), float(detection)] )
             return label
 
@@ -294,7 +297,7 @@ class Slide:
         return l
 
 
-    def getPatchCoordList(self, thresh_method='HED', with_filename=True):
+    def getPatchCoordList(self, thresh_method='OTSU', with_filename=True):
         '''
         Returns a list of coordinates in the slide image where useful data is expected to be present by using 
         thresholding to remove blank or non-informative areas, at the given image level (extraction_level)
@@ -315,5 +318,26 @@ class Slide:
             return [self.getNonZeroLocations(self.mask_negatives, with_filename), \
                 self.getNonZeroLocations(self.mask_annotations, with_filename), \
                 self.getNonZeroLocations(self.mask_neighboring, with_filename)]
+
+    def getPatchCoordListWLabels(self, thresh_method='OTSU', with_filename=True, view_level=1):
+        if self.annotation==None:
+            patch_coords_list = self.getPatchCoordList(thresh_method, with_filename)
+            assert len(patch_coords_list)==1
+            patch_coords_list = patch_coords_list[0]
+            return_list = []
+            for item in patch_coords_list:
+                return_list.append([item[0], item[1], self.getLabel(item[1], level=view_level)])
+            return [return_list]
+
+        else:
+            patch_coords_lists = self.getPatchCoordList(thresh_method, with_filename)
+            return_lists = []
+            for patch_coords_list in patch_coords_lists:
+                return_list = []
+                for item in patch_coords_list:
+                    return_list.append([item[0], item[1], self.getLabel(item[1], level=view_level)])
+                return_lists.append(return_list)
+            return return_lists
+
 
         
