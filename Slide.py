@@ -3,6 +3,7 @@ from PIL import Image
 import cv2
 from skimage.color import rgb2hed
 import xml.etree.cElementTree as ET
+import os
 
 class Annotation:
     '''
@@ -86,7 +87,7 @@ class Slide:
         else:
             self.extraction_level = extraction_level
 
-        if annot_file == None:
+        if annot_file == None or not os.path.exists(annot_file):
             self.annotation = None
         else:
             self.annotation = Annotation(annot_file, scaleFactor=self.slide.level_downsamples[self.extraction_level])
@@ -270,6 +271,8 @@ class Slide:
         elif thresh_method == 'OTSU':
             mask_whole = self.getOtsu()
 
+        self.mask_whole = mask_whole
+
         if self.annotation == None:
             self.mask_negatives = mask_whole
             return
@@ -326,7 +329,7 @@ class Slide:
             patch_coords_list = patch_coords_list[0]
             return_list = []
             for item in patch_coords_list:
-                return_list.append([item[0], item[1], self.getLabel(item[1], level=view_level)])
+                return_list.append([item[0], item[1], self.getLabel(item[1], level=view_level).tolist()])
             return [return_list]
 
         else:
@@ -335,9 +338,19 @@ class Slide:
             for patch_coords_list in patch_coords_lists:
                 return_list = []
                 for item in patch_coords_list:
-                    return_list.append([item[0], item[1], self.getLabel(item[1], level=view_level)])
+                    return_list.append([item[0], item[1], self.getLabel(item[1], level=view_level).tolist()])
                 return_lists.append(return_list)
             return return_lists
 
+    def getTileListWLabels(self, thresh_method='OTSU', view_level=1):
+        '''
+        get Tile and correponding labels list for validation runs - returns only one list (no annotation or neighboring lists)
+        '''        
+        self.generateROIMasks(thresh_method=thresh_method)
+        patch_coords_list = self.getNonZeroLocations(self.mask_whole, with_filename=False)
+        label_list = []
+        for item in patch_coords_list:
+            label_list.append(self.getLabel(item, level=view_level).tolist())
+        return patch_coords_list, label_list
 
         
