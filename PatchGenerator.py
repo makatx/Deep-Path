@@ -13,7 +13,7 @@ def patch_generator(folder, negatives_patch_list,
                     det_patch_list,
                     neighboring_patch_list, 
                     batch_size=64,
-                    sample_factor=1, levels=[0,1,2],
+                    sample_factor=1, levels=[1],
                     dims=(256,5256),
                     save_labels=False, labels_list=None, train_mode=True):
     '''

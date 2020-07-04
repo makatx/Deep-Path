@@ -239,9 +239,19 @@ class Slide:
         c_shifted = self.annotation.shift(origin=coords)
         c_scaled = self.annotation.scale(c_shifted, self.slide.level_downsamples[level])
 
-        mask = cv2.fillPoly(np.zeros((dims[0], dims[1], 1), dtype=np.uint8), c_scaled, (255))
+        mask = cv2.fillPoly(np.zeros((dims[0], dims[1], 1), dtype=np.uint8), c_scaled, (1))
 
         return mask
+
+    def getGTMaskedRegion(self, coords, dims=(256,256), level=1, withMaskArea=False):
+        img = self.getRegionFromSlide(coords, dims, level)
+        mask = self.getGTmask(coords, dims, level)
+        mask_3 = np.dstack((np.zeros_like(mask), mask*255, np.zeros_like(mask)))
+
+        if withMaskArea:
+            return cv2.addWeighted(img, 0.8, mask_3, 0.4, 0), np.sum(mask)
+        else:
+            return cv2.addWeighted(img, 0.8, mask_3, 0.4, 0)
 
     def getLabel(self, coords, dims=(256,256), level=1):
         '''
@@ -255,7 +265,7 @@ class Slide:
             label = np.array( [float(not detection), float(detection)] )
             return label
 
-    def generateROIMasks(self, thresh_method='HED'):
+    def generateROIMasks(self, thresh_method='HED', skip_negatives=False):
         '''
         Calculate and store as object variables: 
             *a mask of the area containing regions of interest in the slide (containing the specimen scan) while exlcuding any regions of positive detection and areas around it
@@ -280,6 +290,9 @@ class Slide:
         self.mask_annotations = self.getAnnotationMask()
         self.mask_neighboring = self.getAnnotationNeighborhoodMask()
 
+        if skip_negatives:
+            return
+        
         self.mask_negatives = np.logical_and(mask_whole, np.logical_not(np.logical_or(self.mask_annotations, self.mask_neighboring)))
         self.mask_negatives = self.mask_negatives.astype(np.uint8)*255
 
@@ -300,7 +313,7 @@ class Slide:
         return l
 
 
-    def getPatchCoordList(self, thresh_method='OTSU', with_filename=True):
+    def getPatchCoordList(self, thresh_method='OTSU', with_filename=True, skip_negatives=False):
         '''
         Returns a list of coordinates in the slide image where useful data is expected to be present by using 
         thresholding to remove blank or non-informative areas, at the given image level (extraction_level)
@@ -313,8 +326,17 @@ class Slide:
         Following the mask generation, the indices of all values that are non-zero are recorded (with_filename if true) and returned as a list  
         '''
 
-        self.generateROIMasks(thresh_method=thresh_method)
+        self.generateROIMasks(thresh_method=thresh_method, skip_negatives=skip_negatives)
         
+        if skip_negatives:
+            if self.annotation==None:
+                return []
+            else:
+                return [[], \
+                    self.getNonZeroLocations(self.mask_annotations, with_filename), \
+                    self.getNonZeroLocations(self.mask_neighboring, with_filename)]
+
+
         if self.annotation==None:
             return [self.getNonZeroLocations(self.mask_negatives)]
         else:
@@ -322,8 +344,8 @@ class Slide:
                 self.getNonZeroLocations(self.mask_annotations, with_filename), \
                 self.getNonZeroLocations(self.mask_neighboring, with_filename)]
 
-    def getPatchCoordListWLabels(self, thresh_method='OTSU', with_filename=True, view_level=1):
-        if self.annotation==None:
+    def getPatchCoordListWLabels(self, thresh_method='OTSU', with_filename=True, view_level=1, skip_negatives=False):
+        if not skip_negatives and self.annotation==None:
             patch_coords_list = self.getPatchCoordList(thresh_method, with_filename)
             assert len(patch_coords_list)==1
             patch_coords_list = patch_coords_list[0]
@@ -333,7 +355,7 @@ class Slide:
             return [return_list]
 
         else:
-            patch_coords_lists = self.getPatchCoordList(thresh_method, with_filename)
+            patch_coords_lists = self.getPatchCoordList(thresh_method, with_filename, skip_negatives=skip_negatives)
             return_lists = []
             for patch_coords_list in patch_coords_lists:
                 return_list = []
