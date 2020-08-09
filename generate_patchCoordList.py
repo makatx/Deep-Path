@@ -7,13 +7,29 @@ import json
 
 folder = '/home/mak/PathAI/slides/train/'
 filenames = []
-for f in os.listdir(folder):
-    if f.endswith('.tif'):
-        filenames.append(f)
+#for f in os.listdir(folder):
+#    if f.endswith('.tif'):
+#        filenames.append(f)
+
+filenames = ['patient_021_node_3.tif',
+'patient_004_node_4.tif',
+'patient_022_node_3.tif',
+'patient_024_node_2.tif',
+'patient_037_node_1.tif',
+'patient_045_node_1.tif',
+'patient_050_node_3.tif',
+'patient_061_node_4.tif',
+'patient_064_node_4.tif',
+'patient_089_node_3.tif']
 
 pcl_negative = []
 pcl_annot = []
 pcl_neigh = []
+extraction_level = 7
+view_level = 1
+skip_negatives = False
+thresh_method = 'HED'
+save_output_to = 'patch_lists/200621_hard_train_slides_validation_set.json'
 
 for filename in tqdm(filenames):
     prefix, _ = os.path.splitext(filename)
@@ -22,25 +38,28 @@ for filename in tqdm(filenames):
 
     if os.path.exists(folder+annotn_filename):
         #print("processing {} with {}". format(filename, annotn_filename))
-        slide = Slide(folder+filename, folder+annotn_filename)
-        pcl = slide.getPatchCoordListWLabels(thresh_method='OTSU', with_filename=True, view_level=0)
+        slide = Slide(folder+filename, folder+annotn_filename, extraction_level=extraction_level)
+        pcl = slide.getPatchCoordListWLabels(thresh_method=thresh_method, with_filename=True, view_level=view_level, skip_negatives=skip_negatives)
         
-        pcl_negative.extend(pcl[0])
+        if not skip_negatives:
+            pcl_negative.extend(pcl[0])
         pcl_annot.extend(pcl[1])
         pcl_neigh.extend(pcl[2])
 
-    else:
+    elif not skip_negatives:
         #print("processing {}". format(filename))
-        slide = Slide(folder+filename)
+        slide = Slide(folder+filename, extraction_level=extraction_level)
         annot = True
-        pcl = slide.getPatchCoordListWLabels(thresh_method='OTSU', with_filename=True, view_level=0)
+        pcl = slide.getPatchCoordListWLabels(thresh_method=thresh_method, with_filename=True, view_level=view_level)
         
         pcl_negative.extend(pcl[0])
 
 pcl_dict = {}
-pcl_dict['negative'] = pcl_negative
+
+if not skip_negatives:
+    pcl_dict['negative'] = pcl_negative
 pcl_dict['neighbor'] = pcl_neigh
 pcl_dict['annotation'] = pcl_annot
 
-with open('200421_patch_coord_lists_w_labels_level0.json', 'w') as f:
+with open(save_output_to, 'w') as f:
     json.dump(pcl_dict, f)
