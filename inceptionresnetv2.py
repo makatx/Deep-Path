@@ -12,7 +12,7 @@ def MIA_InceptionResNetV2(input_image, num_classes=2):
     x = layers.Dense(1024, activation='relu')(x)
     x = layers.Dropout(0.1)(x)
 
-    probabilities = layers.Dense(num_classes, activation='sigmoid')(x)
+    probabilities = layers.Dense(num_classes, activation='softmax')(x)
 
     return probabilities
 
