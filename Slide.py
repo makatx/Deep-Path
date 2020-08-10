@@ -34,6 +34,8 @@ class Annotation:
                 lst.append([float(coord.attrib['Order']), float(coord.attrib['X']), float(coord.attrib['Y'])])
             n = np.array(lst)
             n = n[n[:,0].argsort()]
+            if annot.attrib['Type'] == "None":
+                continue
             self.coords_orig.append(n[:,1:])
             self.coords_order.append(n)
             self.group.append(annot.attrib['PartOfGroup'])
@@ -75,6 +77,9 @@ class Annotation:
             bounds.append(np.array([xmin,ymin,xmax,ymax]))
         self.bounds_orig = np.array(bounds)
     
+
+
+
 class Slide:
 
     def __init__(self, slide_file, annot_file=None, extraction_level=7):
@@ -95,6 +100,7 @@ class Slide:
         self.mask_negatives = None
         self.mask_neighboring = None
         self.mask_annotations = None
+        self.centroids = None
         
 
     def getWSI(self):
@@ -163,9 +169,9 @@ class Slide:
         kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
         return cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel)
 
-    def getOtsu(self, img=None):
-        if img==None:
-            img = self.getRegionFromSlide()
+    def getOtsu(self, img=None, level=None):
+        if type(img)==type(None):
+            img = self.getRegionFromSlide(level=level)
         
         img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         img[img==0] = 255
@@ -219,12 +225,12 @@ class Slide:
 
         return n_mask
     
-    def getDABMask(self, img=None, margins=(25, -25, 25, -35)):
+    def getDABMask(self, img=None, margins=(0, 0, 0, 0), level=None):
         '''
         Returns the bit mask for ROI from the given RGB img, using DAB channel of the HED (deconvoluted) image
         '''
         if img==None:
-            img = self.getRegionFromSlide()
+            img = self.getRegionFromSlide(level=level)
         
         hed = self.getHED(img)
         mask = self.getDABThresholdMask(hed, margins=margins)
@@ -232,21 +238,27 @@ class Slide:
 
         return mask
 
-    def getGTmask(self, coords, dims=(256,256), level=1):
+    def getGTmask(self, coords, dims=(256,256), level=1, fill_val=1):
+        if dims=='full':
+            dims = self.slide.level_dimensions[level]
+
         if self.annotation==None:
-            return np.zeros((dims[0], dims[1], 1), dtype=np.uint8)
+            return np.zeros((dims[1], dims[0], 1), dtype=np.uint8)
 
         c_shifted = self.annotation.shift(origin=coords)
         c_scaled = self.annotation.scale(c_shifted, self.slide.level_downsamples[level])
 
-        mask = cv2.fillPoly(np.zeros((dims[0], dims[1], 1), dtype=np.uint8), c_scaled, (1))
+        mask = cv2.fillPoly(np.zeros((dims[1], dims[0], 1), dtype=np.uint8), c_scaled, (fill_val))
 
         return mask
 
     def getGTMaskedRegion(self, coords, dims=(256,256), level=1, withMaskArea=False):
+        if dims=='full':
+            dims = self.slide.level_dimensions[level]
         img = self.getRegionFromSlide(coords, dims, level)
         mask = self.getGTmask(coords, dims, level)
         mask_3 = np.dstack((np.zeros_like(mask), mask*255, np.zeros_like(mask)))
+
 
         if withMaskArea:
             return cv2.addWeighted(img, 0.8, mask_3, 0.4, 0), np.sum(mask)
@@ -375,4 +387,57 @@ class Slide:
             label_list.append(self.getLabel(item, level=view_level).tolist())
         return patch_coords_list, label_list
 
+        
+    def getCentroids(self, level=0, extraction_level=4):
+        
+        if self.annotation!=None:
+            if self.centroids == None:
+                d = self.slide.level_dimensions[extraction_level]
+                downsample = self.slide.level_downsamples[extraction_level]
+                canvas = np.zeros((d[1], d[0], 1), dtype=np.uint8)
+                centroids = []
+                c_scaled = self.annotation.scale(factor=downsample)
+                partOfGroup = self.annotation.group
+                for c,grp in zip(c_scaled, partOfGroup):
+                    if grp == "normal": continue
+                    cv2.fillPoly(canvas, [c], 255)
+                    contour = cv2.findContours(canvas, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    
+                    try:
+                        M = cv2.moments(contour[1][0])
+                        cx = int(M['m10']/M['m00'])
+                        cy = int(M['m01']/M['m00'])
+                        centroids.append([cx,cy])
+                    except:
+                        print(c*downsample)                 
+                   
+                    canvas = canvas*0
+                if "normal" in partOfGroup:
+                    print("found normal annotation in file: ", self.slide_file)
+                    print("# of centroids/annotation: ", len(centroids), "/", len(c_scaled))
+                else:
+                    assert len(centroids) == len(c_scaled)
+                centroids = np.array(centroids)
+                self.centroids = (centroids * downsample).astype(np.uint)
+
+            return (self.centroids / self.slide.level_downsamples[level]).astype(np.uint)
+        else:
+            return None
+
+    def getNonblankBB(self, img=None, level=None, thresh_method='OTSU'):
+        if level==None:
+            level = self.extraction_level
+        
+        if thresh_method=="OTSU":
+            mask = self.getOtsu(img=img, level=level)
+        elif thresh_method=="HED":
+            mask = self.getDABMask(img=img,level=level)
+        else:
+            return None
+        
+        nz = np.argwhere(mask)
+        XYmin = (np.min(nz[:, 1]), np.min(nz[:, 0]))
+        XYmax = (np.max(nz[:, 1]), np.max(nz[:, 0]))
+
+        return np.array([XYmin, XYmax])
         
