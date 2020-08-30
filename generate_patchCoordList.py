@@ -6,11 +6,15 @@ from tqdm import tqdm
 import json
 
 folder = '/home/mak/PathAI/slides/train/'
+slides_list = '200808_slide_label_train_list.json'
 filenames = []
+with open(slides_list, 'r') as f:
+    filenames = json.load(f)['negative']
 #for f in os.listdir(folder):
 #    if f.endswith('.tif'):
 #        filenames.append(f)
 
+'''
 filenames = ['patient_021_node_3.tif',
 'patient_004_node_4.tif',
 'patient_022_node_3.tif',
@@ -21,6 +25,7 @@ filenames = ['patient_021_node_3.tif',
 'patient_061_node_4.tif',
 'patient_064_node_4.tif',
 'patient_089_node_3.tif']
+'''
 
 pcl_negative = []
 pcl_annot = []
@@ -28,8 +33,8 @@ pcl_neigh = []
 extraction_level = 7
 view_level = 1
 skip_negatives = False
-thresh_method = 'HED'
-save_output_to = 'patch_lists/200621_hard_train_slides_validation_set.json'
+thresh_method = 'OTSU'
+save_output_to = 'patch_lists/200809_negatively_labeled_trainset_slides_patchList_op.json'
 
 for filename in tqdm(filenames):
     prefix, _ = os.path.splitext(filename)
@@ -49,7 +54,7 @@ for filename in tqdm(filenames):
     elif not skip_negatives:
         #print("processing {}". format(filename))
         slide = Slide(folder+filename, extraction_level=extraction_level)
-        annot = True
+        #annot = True
         pcl = slide.getPatchCoordListWLabels(thresh_method=thresh_method, with_filename=True, view_level=view_level)
         
         pcl_negative.extend(pcl[0])

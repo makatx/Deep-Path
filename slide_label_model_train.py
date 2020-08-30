@@ -36,21 +36,26 @@ def buildMask(file, patch_predictions, level=5, prediction_level = 1, patch_dim=
     '''
     Given the list of patch coordinates and their model predictied probablities in patch_predictions (ex of single list item: [[12312,89709],[0.2,0.8]]),
     and the dimensions of the patch, build the prediction mask at given level for the slide from given file 
+    Tile areas that overlap are averaged 
     '''
+    #print("File name from buildMask: ", file)
     slide = Slide(file)
     patch_scale = slide.slide.level_downsamples[prediction_level]/slide.slide.level_downsamples[level]
-    scaled_dim = patch_dim * patch_scale
+    scaled_dim = int(patch_dim * patch_scale)
 
     coord_scale = slide.slide.level_downsamples[level]
 
     mask = np.zeros(slide.slide.level_dimensions[level][::-1])
-
+    mask_counter = np.zeros_like(mask)
     for coord_l0, score in patch_predictions:
-        coord = [coord_l0[0]*coord_scale, coord_l0[1]*coord_scale]
+        coord = [int(coord_l0[0]/coord_scale), int(coord_l0[1]/coord_scale)]
 
-        mask[coord[1]:coord[1]+scaled_dim, coord[0]:coord[0]+scaled_dim] = score[1]
+        mask[coord[1]:coord[1]+scaled_dim, coord[0]:coord[0]+scaled_dim] += score[1]
+        mask_counter[coord[1]:coord[1]+scaled_dim, coord[0]:coord[0]+scaled_dim] += 1
 
-    return mask
+    mask_counter[mask_counter==0] =1
+
+    return mask/mask_counter
 
 def resizeMask(mask, dimensions):
     if dimensions[0]>dimensions[1] and mask.shape[1]>mask.shape[0]:
@@ -63,7 +68,7 @@ def resizeMask(mask, dimensions):
     mask = cv2.resize(mask, dimensions[::-1])
     return mask
 
-def addNoise(img, mu=0, sigma=0.1):
+def addNoise(img, mu=0, sigma=0.001):
     noise = np.random.normal(mu,sigma, img.shape)
     noisy_mask = img+noise
     noisy_mask[noisy_mask>1]=1
@@ -98,6 +103,8 @@ def generateBatch(maskSource, gt, folder, batch_size=10, level=5, dimensions=(60
     elif type(maskSource)==type({}):
         filelist = maskSource.keys()
         gen=False
+
+    #print("File list: ", filelist)
 
     for file in filelist:
         if b==batch_size:

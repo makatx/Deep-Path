@@ -4,6 +4,7 @@ import cv2
 from skimage.color import rgb2hed
 import xml.etree.cElementTree as ET
 import os
+import math
 
 class Annotation:
     '''
@@ -111,7 +112,7 @@ class Slide:
         
 
     def getRegionFromSlide(self, start_coord=(0,0), dims='full', level=None):
-        if level==None:
+        if level==None or level>=self.slide.level_count:
             level = self.extraction_level
 
         if dims == 'full':
@@ -161,13 +162,17 @@ class Slide:
             hed[:,:,i] = (hed[:,:,i]-r_min) * 255.0/r
         return hed.astype(np.uint8)
 
-    def performClose(self, img, kernel_size=3):
+    def performClose(self, img, kernel_size=5):
         kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
         return cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
 
-    def performOpen(self, img, kernel_size=3):
+    def performOpen(self, img, kernel_size=5):
         kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
         return cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel)
+
+    def performDilation(self, img, kernel_size=5):
+        kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+        return cv2.dilate(img, kernel, iterations=1)
 
     def getOtsu(self, img=None, level=None):
         if type(img)==type(None):
@@ -176,10 +181,26 @@ class Slide:
         img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         img[img==0] = 255
         mask = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)[1]
-        mask = self.performClose(self.performOpen(mask, kernel_size=5))
+        #mask = self.performOpen(self.performClose(mask))
+        #mask = self.performClose(mask)
+        mask = self.performDilation(mask)
 
         return mask
+
+    def getGrayThreshMask(self, img=None, level=None, thresh=0.8):
+        if type(img)==type(None):
+            img = self.getRegionFromSlide(level=level)
         
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        img[img>=thresh*255] = 0
+        mask = np.zeros_like(img, dtype=np.uint8)
+        mask[img>0] = 1
+        #mask = self.performOpen(self.performClose(mask))
+        #mask = self.performClose(mask)
+        mask = self.performDilation(mask)
+
+        return mask
+
     def getAnnotationMask(self):
         if self.annotation == None:
             return None
@@ -225,7 +246,7 @@ class Slide:
 
         return n_mask
     
-    def getDABMask(self, img=None, margins=(0, 0, 0, 0), level=None):
+    def getDABMask(self, img=None, margins=None, level=None):
         '''
         Returns the bit mask for ROI from the given RGB img, using DAB channel of the HED (deconvoluted) image
         '''
@@ -234,7 +255,9 @@ class Slide:
         
         hed = self.getHED(img)
         mask = self.getDABThresholdMask(hed, margins=margins)
-        mask = self.performOpen(self.performClose(mask))
+        #mask = self.performOpen(self.performClose(mask))
+        #mask = self.performClose(mask)
+        mask = self.performDilation(mask)
 
         return mask
 
@@ -277,7 +300,7 @@ class Slide:
             label = np.array( [float(not detection), float(detection)] )
             return label
 
-    def generateROIMasks(self, thresh_method='HED', skip_negatives=False):
+    def generateROIMasks(self, thresh_method='GRAY', skip_negatives=False, level=None):
         '''
         Calculate and store as object variables: 
             *a mask of the area containing regions of interest in the slide (containing the specimen scan) while exlcuding any regions of positive detection and areas around it
@@ -287,11 +310,15 @@ class Slide:
         The ROI selection is done based on the given thresh_method, which could be either 
                 'HED' (DAB channel of the color deconvoluted, rescaled image) or
                 'OTSU' (Otsu thresholded mask)
+                'GRAY' (Ignores all pixels>0.8 on grayscale)
+                GRAY is set as default as it has balanced performance and better of the set
         '''
         if thresh_method == 'HED':
-            mask_whole = self.getDABMask()
+            mask_whole = self.getDABMask(level=level)
         elif thresh_method == 'OTSU':
-            mask_whole = self.getOtsu()
+            mask_whole = self.getOtsu(level=level)
+        elif thresh_method == 'GRAY':
+            mask_whole = self.getGrayThreshMask(level=level)
 
         self.mask_whole = mask_whole
 
@@ -309,9 +336,12 @@ class Slide:
         self.mask_negatives = self.mask_negatives.astype(np.uint8)*255
 
 
-    def getNonZeroLocations(self, mask, with_filename=True):
+    def getNonZeroLocations(self, mask, with_filename=True, level=None):
+        if level==None:
+            level = self.extraction_level
+        
         nzs = np.argwhere(mask)
-        nzs = nzs * self.slide.level_downsamples[self.extraction_level]
+        nzs = nzs * self.slide.level_downsamples[level]
         nzs = nzs.astype(np.int32)
         nzs = np.flip(nzs, 1)
 
@@ -386,6 +416,45 @@ class Slide:
         for item in patch_coords_list:
             label_list.append(self.getLabel(item, level=view_level).tolist())
         return patch_coords_list, label_list
+
+    def getTileList(self, thresh_method=None, view_level=1, extraction_level=5, area=0, patch_size=256, overlap=0.5):
+        '''
+        This function returns list of start coordinates of square patches extracted from slide.
+        
+        If 'area' is specified, as level-0 rect coordinates tuple like ((x1,y1), (x2,y2)), then list of tiles returned are from within this area of the slide
+
+        If 'thresh_method' is None, tiles are adjacent patches with no discrimnation of AoI (area of interest), so it will include blank areas as well
+        tiles extracted are of size 'patch_size' (measured at view_level) and overlap of 'overlap' (<1) between patches
+
+        If 'thresh_method' is either 'GRAY', 'OTSU' or 'HED', these methods are used 
+        '''
+        if thresh_method==None:
+            ds = self.slide.level_downsamples[view_level]
+        else:
+            ds = self.slide.level_downsamples[extraction_level]
+    
+        if area==0:
+            d = self.slide.level_dimensions[view_level]
+            fov = ((0,0), (d[0], d[1]))
+        else:
+            fov = ((int(area[0][0]/ds),int(area[0][1]/ds)), (int(area[1][0]/ds),int(area[1][1]/ds)))
+
+        tile_list = []
+
+        if thresh_method==None:
+            ## run across the slide within field of view (fov) and generate coordinates
+            shift = patch_size - math.ceil(overlap*patch_size)
+            for x in range(fov[0][0], fov[1][0], shift):
+                for y in range(fov[0][1], fov[1][1], shift):
+                    tile_list.append([int(x*ds),int(y*ds)])
+            return tile_list
+        
+        else:
+            self.generateROIMasks(thresh_method=thresh_method, level=extraction_level)
+            mask = self.mask_whole[fov[0][1]:fov[1][1], fov[0][0]:fov[1][0]]
+            tile_list = self.getNonZeroLocations(mask, with_filename=False, level=extraction_level)
+            return tile_list.tolist()
+
 
         
     def getCentroids(self, level=0, extraction_level=4):
