@@ -5,12 +5,14 @@ from Slide import Slide
 import tensorflow as tf
 from sklearn.utils import shuffle
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix
 
 from keras.models import Model, load_model
 from keras.layers import Input, Dense, Softmax
 from keras import backend as K
 from keras.optimizers import SGD, Adam, Adadelta, Nadam
 from keras.callbacks import ModelCheckpoint, CSVLogger, LearningRateScheduler
+
 
 from LargeInMB import LargeInputMobileNetv2
 
@@ -22,6 +24,8 @@ from datetime import datetime
 LEARNING_RATE = 0.001
 DECAY_RATE = 0.99
 DECAY_STEP = 10
+
+catch_log = {}
 
 '''
 Get the mask of slide and resize it, followed by gaussian noising. Provide back this mask
@@ -55,7 +59,7 @@ def buildMask(file, patch_predictions, level=5, prediction_level = 1, patch_dim=
 
     mask_counter[mask_counter==0] =1
 
-    return mask/mask_counter
+    return mask /mask_counter
 
 def resizeMask(mask, dimensions):
     if dimensions[0]>dimensions[1] and mask.shape[1]>mask.shape[0]:
@@ -68,7 +72,7 @@ def resizeMask(mask, dimensions):
     mask = cv2.resize(mask, dimensions[::-1])
     return mask
 
-def addNoise(img, mu=0, sigma=0.001):
+def addNoise(img, mu=0, sigma=0.0001):
     noise = np.random.normal(mu,sigma, img.shape)
     noisy_mask = img+noise
     noisy_mask[noisy_mask>1]=1
@@ -86,55 +90,68 @@ def generateTrainingInput(slidefile, folder='', level=5, dimensions=(6000, 3000)
     if len(patch_predictions)==0:
         mask = getMask(folder+slidefile, level)
     else:
-        mask = buildMask(folder+slidefile, patch_predictions, level=5)
+        mask = buildMask(folder+slidefile, patch_predictions, level=level)
     mask = resizeMask(mask, dimensions)
     mask = addNoise(mask)
     
     return mask.reshape((mask.shape[0], mask.shape[1],1))
 
-def generateBatch(maskSource, gt, folder, batch_size=10, level=5, dimensions=(6000,3000)):
+def generateBatch(maskSource, gt, folder, predictions_folder, batch_size=10, level=5, dimensions=(6000,3000)):
     images = []
     y_train = []
+    file_list = []
     b = 0
 
-    if type(maskSource)==type([]):
-        filelist = maskSource
-        gen=True
-    elif type(maskSource)==type({}):
-        filelist = maskSource.keys()
-        gen=False
+    while 1:
+        maskSource = shuffle(maskSource)
 
-    #print("File list: ", filelist)
-
-    for file in filelist:
-        if b==batch_size:
-            b=0
+        for file in maskSource:
+            if b==batch_size:
+                b=0
+                images_batch = np.array(images)
+                y_train_batch = np.array(y_train)
+                catch_log['file_list']= file_list
+                catch_log['images_batch_dimensions'] = images_batch.shape
+                catch_log['y_train_dimensions'] = y_train_batch.shape
+                images, y_train, file_list = [], [], []
+                yield images_batch, y_train_batch
+#            with open(predictions_folder+file+'.json', 'r') as f:
+#                patch_predictions = json.load(f)[file]
+            patch_predictions = []
+            images.append(generateTrainingInput(file, folder, level=level, dimensions=dimensions, patch_predictions=patch_predictions))
+#TODO            
+            ## Changing to two category (-ve/+ve) to test learning ability 
+            #label = [0,0,0,0]
+            #label[gt[file]]=1
+            if gt[file]==0:
+                label = [1,0]
+            else:
+                label = [0,1]
+            ## ###
+            
+            file_list.append(file)
+            y_train.append(label)
+            b+=1
+        if b!=0:
             images_batch = np.array(images)
             y_train_batch = np.array(y_train)
-            images, y_train = [], []
+            catch_log['images_batch_dimensions'] = images_batch.shape
+            catch_log['y_train_dimensions'] = y_train_batch.shape
+            catch_log['file_list']= file_list
+            b = 0
+            images, y_train, file_list = [], [], []
+           
             yield images_batch, y_train_batch
-        if gen:
-            images.append(generateTrainingInput(file, folder, level=level, dimensions=dimensions))
-        else:
-            images.append(generateTrainingInput(file, folder, level=level, dimensions=dimensions, patch_predictions=maskSource[file]))
-        label = [0,0,0,0]
-        label[gt[file]]=1
-        y_train.append(label)
-        b+=1
-    images_batch = np.array(images)
-    y_train_batch = np.array(y_train)
-    images, y_train = [], []
-    yield images_batch, y_train_batch
 
 
 if __name__ == '__main__':
 
-    archs = ['inceptionv3', 'inceptionresnetv2', 'mobilenetv2']
-
+    
     ## Parse input arguments from commandline
     aparser = argparse.ArgumentParser(description='Train (or continue to train) large input CNN (mobilenet bb) model on dummy prediction score masks')
     aparser.add_argument('--train-filelist', type=str, help='Specify the file list for training set or the dictionary containing patch coordinates/predicitons per slide filename (as key)')
     aparser.add_argument('--test-filelist', type=str, help='Specify the file list for test set')
+    aparser.add_argument('--predictions-folder', type=str, default='', help='Path of the slides\' patch level predictions folder. Here, files per slide containing patch coords/predictions are expected. File name format should be <slidefilename>.json, which is a dict with one key:value pair, with slidefilename being the key.')
     aparser.add_argument('--gt-file', type=str, help='Specify the ground truth file')
     aparser.add_argument('--batch-size', type=int, default=10, help='batch_size to use')
     aparser.add_argument('--initial-epoch', type=int, default=0, help='starting epoch number to use for this run')
@@ -142,7 +159,7 @@ if __name__ == '__main__':
     aparser.add_argument('--learning-rate', type=float, default=1e-2, help='learning rate')
     aparser.add_argument('--checkpoint-dir', type=str, default='checkpoints/', help='location to store checkpoints/model weights after each epoch')
     aparser.add_argument('--log-dir', type=str, default='logs/', help='location to store fit.log (appended)')
-    aparser.add_argument('--saves-name', type=str, default='__', help='string to add in checkpoints and model saves file names')
+    aparser.add_argument('--saves-name', type=str, default='_SLP_', help='string to add in checkpoints and model saves file names')
     aparser.add_argument('--optimizer', choices=['adadelta', 'adam', 'sgd', 'nadam'], type=str, default='adam', help='Optimizer to use (default parameters)')
     aparser.add_argument('--nesterov', type=bool, default=False, help='Use Nesterov with SGD?')
     aparser.add_argument('--momentum', type=float, default=0, help='momentum with SGD')
@@ -150,6 +167,7 @@ if __name__ == '__main__':
     aparser.add_argument('--train-level', type=int, default=5, help='the slide levelto generate masks from')
     aparser.add_argument('--slides-folder', type=str, default='', help='Path of the slides and annotation folder. Should be empty (or not set) if patch coord list (json) already has this')
     aparser.add_argument('--load-model-file', type=str, help='full path of the model save file to load')
+    aparser.add_argument('--load-weights', type=str, help='full path of the model weights file to load')
 
     args = aparser.parse_args()
 
@@ -163,8 +181,8 @@ if __name__ == '__main__':
     with open(args.gt_file, 'r') as f:
         gt_dict = json.load(f)
 
-    train_generator = generateBatch(train_filelist, gt_dict, folder=args.slides_folder, batch_size=args.batch_size, level=args.train_level, dimensions=dims)
-    validn_generator = generateBatch(test_filelist, gt_dict, folder=args.slides_folder, batch_size=args.batch_size, level=args.train_level, dimensions=dims)
+    train_generator = generateBatch(train_filelist, gt_dict, folder=args.slides_folder, predictions_folder=args.predictions_folder, batch_size=args.batch_size, level=args.train_level, dimensions=dims)
+    validn_generator = generateBatch(test_filelist, gt_dict, folder=args.slides_folder, predictions_folder=args.predictions_folder, batch_size=args.batch_size, level=args.train_level, dimensions=dims)
 
     train_steps_per_epoch = math.ceil(len(train_filelist)/args.batch_size)
     validn_steps_per_epoch = math.ceil(len(test_filelist)/args.batch_size)
@@ -173,7 +191,12 @@ if __name__ == '__main__':
         model = load_model(args.load_model_file)
     else:
         mask_in = Input(shape=(dims[0],dims[1],1,))
-        model = LargeInputMobileNetv2(mask_in, num_classes=4)
+#TODO: Set the num_classes back to 4
+        model = LargeInputMobileNetv2(mask_in, num_classes=2)
+    if args.load_weights != None:
+        model.load_weights(args.load_weights)
+        print('Loaded weights from {}'.format(args.load_weights))
+
     
     checkpointer = ModelCheckpoint(args.checkpoint_dir+date+'_slideLabelCNN' +'_'+str(args.learning_rate)+'_weights_'+args.saves_name+'_{epoch:02d}--{categorical_accuracy:.4f}--{val_loss:.4f}.hdf5', monitor='categorical_accuracy',
                             save_weights_only=True, save_best_only=True)
@@ -182,6 +205,7 @@ if __name__ == '__main__':
 
     if args.optimizer=='sgd':
         opt = SGD(lr=args.learning_rate, momentum=args.momentum, nesterov=args.nesterov)
+        print("\tNesterov: ", args.nesterov)
     elif args.optimizer=='adam':
         opt = Adam(lr=args.learning_rate)
     elif args.optimizer=='adadelta':
@@ -193,8 +217,14 @@ if __name__ == '__main__':
     
     model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['categorical_accuracy'])
 
-    history = model.fit_generator(train_generator, steps_per_epoch=train_steps_per_epoch, epochs=args.epochs, verbose=1, callbacks=callbacks,
-    validation_data=validn_generator, validation_steps=validn_steps_per_epoch, initial_epoch=args.initial_epoch)
+    try:
+        history = model.fit_generator(train_generator, steps_per_epoch=train_steps_per_epoch, epochs=args.epochs, verbose=1, callbacks=callbacks,
+        validation_data=validn_generator, validation_steps=validn_steps_per_epoch, initial_epoch=args.initial_epoch)
 
+    except:
+        print(sys.exc_info())
+        print(catch_log)
+
+    
     last_epoch = args.epochs
     model.save('modelsaves/'+ date + '_slideLabelCNN_'+args.saves_name+'_afterEpoch-'+str(last_epoch)+'.h5')

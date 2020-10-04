@@ -2,9 +2,152 @@ import numpy as np, openslide
 from PIL import Image
 import cv2
 from skimage.color import rgb2hed
+from sklearn.cluster import DBSCAN
+from skimage.measure import regionprops
 import xml.etree.cElementTree as ET
 import os
 import math
+
+class FeatureExtractor:
+    '''
+    Objects of this class take in a Slide object and its probability map (coordinate/probability list) and creates masks at
+    specified level, from where it provides the ability to indentify clusters, masks of those clusters and also, features of
+    those clusters.
+    '''
+    def __init__(self, slide, extraction_level, probability_map=None, threshold=0.9):
+        self.slide = slide
+        self.extraction_level = extraction_level if extraction_level < slide.slide.level_count else slide.slide.level_count-1
+        self.pmap = probability_map
+        self.threshold = threshold
+        self.mask = self.createMaskfromAnnot() if probability_map==None else self.createMaskfromPMap()
+        self.cluster_masks = []
+        self.evaluateClusters()
+        self.createClusterMasks()
+        self.extractFeatures()
+
+
+    def createMaskfromAnnot(self):
+        mask = self.slide.getGTmask((0,0), dims='full', level=self.extraction_level)
+        return mask.reshape((mask.shape[0], mask.shape[1]))
+
+    def createMaskfromPMap(self, prediction_level=1):
+        slide = self.slide
+        level = self.extraction_level
+        patch_dim = 256
+        patch_scale = slide.slide.level_downsamples[prediction_level]/slide.slide.level_downsamples[level]
+        scaled_dim = int(patch_dim * patch_scale)
+
+        coord_scale = slide.slide.level_downsamples[level]
+
+        mask = np.zeros(slide.slide.level_dimensions[level][::-1])
+        mask_counter = np.zeros_like(mask)
+        for coord_l0, score in self.pmap:
+            coord = [int(coord_l0[0]/coord_scale), int(coord_l0[1]/coord_scale)]
+
+            mask[coord[1]:coord[1]+scaled_dim, coord[0]:coord[0]+scaled_dim] += score[1]
+            mask_counter[coord[1]:coord[1]+scaled_dim, coord[0]:coord[0]+scaled_dim] += 1
+
+        mask_counter[mask_counter==0] =1
+        mask = mask/mask_counter
+
+        ## Apply threshold
+        #mask[mask<self.threshold] = 0
+
+        return mask
+
+    def evaluateClusters(self, eps=1, min_samples=3):
+        self.cluster_nzs = np.argwhere(self.mask>=self.threshold) #self.slide.getNonZeroLocations(mask=self.mask, with_filename=False, level=self.extraction_level)
+        #self.cluster_nzs = np.flip(nzs, 1)
+        if self.cluster_nzs.shape[0] == 0:
+            self.cluster_labels = []
+            self.cluster_count = 0
+            return
+            
+        db = DBSCAN(eps=eps, min_samples=min_samples).fit(self.cluster_nzs)
+        labels = db.labels_
+        self.cluster_labels = labels
+        self.cluster_count = len(set(labels)) - (1 if -1 in labels else 0)
+        #print("Cluster count:", self.cluster_count)
+
+
+    def createClusterMasks(self):
+        self.cluster_masks = {}
+
+        for l in range(self.cluster_count):
+            mask = np.zeros_like(self.mask)
+            for coord, label in zip(self.cluster_nzs, self.cluster_labels):
+                mask[coord[0], coord[1]] = (1 if label==l else 0)
+            self.cluster_masks[l]=mask.astype(np.uint8)
+
+
+    def extractFeatures(self):
+        self.features = {}
+        self.features['number_of_clusters'] = self.cluster_count
+        if self.cluster_count == 0:
+            self.features['detection_total_area'] = 0
+            self.features['detection_largest_area'] = 0
+            self.features['major_axis_length_largest_cluster'] = 0
+            self.calculateAvgProb()
+            self.calculateMaxProb()
+            self.calcutateDetectiontoROIRatio()
+            return
+
+        self.calculateAreaFeatures()
+        self.calculateLargestAxis()
+        self.calculateAvgProb()
+        self.calculateMaxProb()
+        self.calcutateDetectiontoROIRatio()
+
+    def calculateAreaFeatures(self):
+        ## Total masks area
+        ## Area of largest region
+        ## Area of ROI slide
+        total_masks_area = 0
+        largest_area = 0
+        largest_region_label = -1
+        for k,v in self.cluster_masks.items():
+            area = np.sum(v) * self.slide.slide.level_downsamples[self.extraction_level]**2
+            (largest_area, largest_region_label) = (area, k) if area>largest_area else (largest_area, largest_region_label)
+            total_masks_area += area
+        self.features['detection_total_area'] = total_masks_area
+        self.features['detection_largest_area'] = largest_area
+        self.cluster_largest_label = largest_region_label
+
+    def calculateAvgProb(self):
+        self.features['average_probability_overall'] = np.average(self.mask[self.mask>0])
+
+        ## largest area average prob:
+        if self.cluster_count > 0:
+            mask_large = self.mask[self.cluster_masks[self.cluster_largest_label]>0]
+            self.features['average_probability_largest_cluster'] = np.average(mask_large)
+        else:
+            self.features['average_probability_largest_cluster'] = 0
+
+    def calculateMaxProb(self):
+        self.features['maximum_probabilty_overall'] = np.max(self.mask)
+
+        ## largest area max prob:
+        if self.cluster_count>0:
+            mask_large = self.mask[self.cluster_masks[self.cluster_largest_label]>0]
+            self.features['maximum_probabilty_largest_cluster'] = np.max(mask_large)
+        else:
+            self.features['maximum_probabilty_largest_cluster'] = 0
+
+
+    def calculateLargestAxis(self):
+        mask = self.cluster_masks[self.cluster_largest_label]
+        props = regionprops(mask, coordinates='rc')[0]
+        self.features['major_axis_length_largest_cluster'] = props.major_axis_length * self.slide.slide.level_downsamples[self.extraction_level]
+
+    def calcutateDetectiontoROIRatio(self):
+        self.slide.generateROIMasks(thresh_method='GRAY', skip_negatives=True, level=self.extraction_level)
+        roi_area = np.sum(self.slide.mask_whole) * self.slide.slide.level_downsamples[self.extraction_level]**2
+        self.features['foreground_area'] = roi_area
+        self.features['detection_to_foreground_ratio'] = self.features['detection_total_area']/roi_area
+        self.features['slide_area'] = self.mask.shape[0]*self.mask.shape[1]*self.slide.slide.level_downsamples[self.extraction_level]**2
+
+
+
 
 class Annotation:
     '''
@@ -428,6 +571,9 @@ class Slide:
 
         If 'thresh_method' is either 'GRAY', 'OTSU' or 'HED', these methods are used 
         '''
+        if extraction_level > self.slide.level_count-1:
+            extraction_level = self.slide.level_count-1
+
         if thresh_method==None:
             ds = self.slide.level_downsamples[view_level]
         else:
@@ -510,3 +656,5 @@ class Slide:
 
         return np.array([XYmin, XYmax])
         
+    def instantiateFeatureExtractor(self, extraction_level=5, probability_map=None, threshold=0.9):
+        self.fe = FeatureExtractor(slide=self, extraction_level=extraction_level, probability_map=probability_map, threshold=threshold)

@@ -107,8 +107,12 @@ if __name__ == '__main__':
             probs = MIA_InceptionV3(input_patch, num_classes=2)
         elif args.architecture == 'inceptionresnetv2':
             probs = MIA_InceptionResNetV2(input_patch, num_classes=2)
-
         model = Model(input_patch, probs)
+    if load_weights != None:
+        model.load_weights(load_weights)
+        print('Loaded weights from {}'.format(load_weights))
+
+
     checkpointer = ModelCheckpoint(checkpoint_dir+date+'_' + args.architecture +'_'+str(learning_rate)+'_weights_'+saves_name+'_{epoch:02d}--{categorical_accuracy:.4f}--{val_loss:.4f}.hdf5', monitor='categorical_accuracy',
                             save_weights_only=True, save_best_only=True)
     csvlogger = CSVLogger(log_dir+'_'+date+'_' + args.architecture +'_'+saves_name+'_fit.log', append=True)
@@ -149,12 +153,6 @@ if __name__ == '__main__':
     sublist_size = math.ceil(len(test_true_list)/sample_factor) - len(test_neigh_list)
     sampleset_size_validn = len(test_neg_list[:sublist_size]) + len(test_true_list) + len(test_neigh_list)
     steps_per_epoch_validn = math.ceil(sampleset_size_validn/batch_size)
-
-
-    if load_weights != None:
-        model.load_weights(load_weights)
-        print('Loaded weights from {}'.format(load_weights))
-
 
     history = model.fit_generator(train_generator, steps_per_epoch=steps_per_epoch, epochs=epochs, verbose=1, callbacks=callbacks,
     validation_data=validn_generator, validation_steps=steps_per_epoch_validn, initial_epoch=initial_epoch)
