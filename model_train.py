@@ -38,6 +38,7 @@ if __name__ == '__main__':
     aparser.add_argument('--load-weights', type=str, help='full path of the checkpoint/model weights file to load')
     aparser.add_argument('--load-model-file', type=str, help='full path of the model save file to load')
     aparser.add_argument('--batch-size', type=int, default=32, help='batch_size to use')
+    aparser.add_argument('--patch-dim', type=int, default=512, help='Side of the square patch in pixels')
     aparser.add_argument('--initial-epoch', type=int, default=0, help='starting epoch number to use for this run')
     aparser.add_argument('--epochs', type=int, default=1, help='number of epochs to run the training for')
     aparser.add_argument('--learning-rate', type=float, default=1e-2, help='learning rate')
@@ -50,7 +51,7 @@ if __name__ == '__main__':
     aparser.add_argument('--nesterov', type=bool, default=False, help='Use Nesterov with SGD?')
     aparser.add_argument('--momentum', type=float, default=0, help='momentum with SGD')
     aparser.add_argument('--decay-lr', type=bool, default=False, help='Optimizer to use (default parameters)')
-    aparser.add_argument('--train-level', choices=[0,1], type=int, default=1, help='the slide/zoom level the network should train on')
+    aparser.add_argument('--train-level', choices=[0,1], type=int, default=0, help='the slide/zoom level the network should train on')
     aparser.add_argument('--slides-folder', type=str, default='', help='Path of the slides folder. Should be empty (or not set) if patch coord list (json) already has this')
 
     args = aparser.parse_args()
@@ -94,19 +95,19 @@ if __name__ == '__main__':
     train_true_list, test_true_list = train_test_split(all_patch_list['annotation'], test_size=0.1)
     train_neigh_list, test_neigh_list = train_test_split(all_patch_list['neighbor'], test_size=0.1)
 
-    dims = (256,256)
-    input_patch = Input(shape=(dims[0],dims[1],3,))
-
+    dims = (args.patch_dim, args.patch_dim)
+    
     if load_model_file != None:
         model = load_model(load_model_file)
     else:
+        input_patch = Input(shape=(dims[0],dims[1],3,))
         if args.architecture == 'mobilenetv2':
             depth_multiplier = 0.75
-            probs = MobileNetv2Classifier(input_patch, num_classes=2, output_stride=32, depth_multiplier=depth_multiplier)
+            probs = MobileNetv2Classifier(input_patch, num_classes=4, output_stride=32, depth_multiplier=depth_multiplier)
         elif args.architecture == 'inceptionv3':
-            probs = MIA_InceptionV3(input_patch, num_classes=2)
+            probs = MIA_InceptionV3(input_patch, num_classes=4)
         elif args.architecture == 'inceptionresnetv2':
-            probs = MIA_InceptionResNetV2(input_patch, num_classes=2)
+            probs = MIA_InceptionResNetV2(input_patch, num_out=4)
         model = Model(input_patch, probs)
     if load_weights != None:
         model.load_weights(load_weights)
@@ -134,7 +135,7 @@ if __name__ == '__main__':
     else:
         opt = args.optimizer
 
-    model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['categorical_accuracy'])
+    model.compile(optimizer=opt, loss='binary_crossentropy', metrics=['categorical_accuracy'])
 
     train_generator = patch_generator(args.slides_folder,
                                 train_neg_list, train_true_list, train_neigh_list,

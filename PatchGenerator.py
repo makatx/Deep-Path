@@ -13,8 +13,8 @@ def patch_generator(folder, negatives_patch_list,
                     det_patch_list,
                     neighboring_patch_list, 
                     batch_size=64,
-                    sample_factor=1, levels=[1],
-                    dims=(256,5256),
+                    sample_factor=1, levels=[0],
+                    dims=(512,512),
                     save_labels=False, labels_list=None, train_mode=True):
     '''
     Returns (via yields) the sample image patch and corresponding ground truth mask, in given batch_size, using
@@ -108,7 +108,7 @@ def patch_generator(folder, negatives_patch_list,
                 if len(sample) == 3:
                     ground_truth.append(np.array(sample[2]))
                 else:
-                    ground_truth.append(slide.getLabel(coords,(zoom_dims, zoom_dims), level))
+                    ground_truth.append(slide.getLabelQuad(coords,(zoom_dims, zoom_dims), level))
 
                 #print('Level used: {}'.format(level))
 

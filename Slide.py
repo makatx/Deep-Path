@@ -30,10 +30,10 @@ class FeatureExtractor:
         mask = self.slide.getGTmask((0,0), dims='full', level=self.extraction_level)
         return mask.reshape((mask.shape[0], mask.shape[1]))
 
-    def createMaskfromPMap(self, prediction_level=1):
+    def createMaskfromPMap(self, prediction_level=0):
         slide = self.slide
         level = self.extraction_level
-        patch_dim = 256
+        patch_dim = 512
         patch_scale = slide.slide.level_downsamples[prediction_level]/slide.slide.level_downsamples[level]
         scaled_dim = int(patch_dim * patch_scale)
 
@@ -317,6 +317,21 @@ class Slide:
         kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
         return cv2.dilate(img, kernel, iterations=1)
 
+    def getDABMask(self, img=None, margins=None, level=None):
+        '''
+        Returns the bit mask for ROI from the given RGB img, using DAB channel of the HED (deconvoluted) image
+        '''
+        if img==None:
+            img = self.getRegionFromSlide(level=level)
+        
+        hed = self.getHED(img)
+        mask = self.getDABThresholdMask(hed, margins=margins)
+        #mask = self.performOpen(self.performClose(mask))
+        #mask = self.performClose(mask)
+        mask = self.performDilation(mask)
+
+        return mask
+
     def getOtsu(self, img=None, level=None):
         if type(img)==type(None):
             img = self.getRegionFromSlide(level=level)
@@ -353,7 +368,7 @@ class Slide:
         mask = cv2.fillPoly(canvas, self.annotation.coords_list, 255)
         return mask
 
-    def getAnnotationNeighborhoodMask(self, kernel_size_inland=5, kernel_size_coast=2):
+    def getAnnotationNeighborhoodMask(self, kernel_size_inland=5, kernel_size_coast=2, thresh_method='GRAY', level=None):
         '''
         Return a mask image with non-zero values only around the region of the annotation mask.
 
@@ -364,15 +379,24 @@ class Slide:
         
         kernel_inland = np.ones((kernel_size_inland, kernel_size_inland), np.uint8)
         kernel_coast = np.ones((kernel_size_coast, kernel_size_coast), np.uint8)
-        otsu_mask = self.getOtsu()
+        
+        if thresh_method == 'HED':
+            foreground = self.getDABMask(level=level)
+        elif thresh_method == 'OTSU':
+            foreground = self.getOtsu(level=level)
+        elif thresh_method == 'GRAY':
+            foreground = self.getGrayThreshMask(level=level)
 
         annotation_mask = self.getAnnotationMask()
-        #annotation_mask_dilated = cv2.dilate(annotation_mask, kernel, iterations=1)
 
+        #annotation_mask_dilated = cv2.dilate(annotation_mask, kernel, iterations=1)
         #n_mask = np.logical_xor(annotation_mask, annotation_mask_dilated)
 
-        annot_inland = np.logical_and(annotation_mask, otsu_mask)
-        annot_coast = np.logical_and(annotation_mask, np.logical_not(otsu_mask))
+        ## Simply dilating the whole annotation would have sufficed however the below approach selectively expands
+        ## the area where the specimen (foreground) is to a higher extent (larger kernel for inland) than where not (coast)
+
+        annot_inland = np.logical_and(annotation_mask, foreground)
+        annot_coast = np.logical_and(annotation_mask, np.logical_not(foreground))
 
         annot_inland_dilated = cv2.dilate(annot_inland.astype(np.uint8)*255, kernel_inland)
         annot_coast_dilated = cv2.dilate(annot_coast.astype(np.uint8)*255, kernel_coast)
@@ -388,23 +412,8 @@ class Slide:
         n_mask = 255*(n_mask.astype(np.uint8))
 
         return n_mask
-    
-    def getDABMask(self, img=None, margins=None, level=None):
-        '''
-        Returns the bit mask for ROI from the given RGB img, using DAB channel of the HED (deconvoluted) image
-        '''
-        if img==None:
-            img = self.getRegionFromSlide(level=level)
-        
-        hed = self.getHED(img)
-        mask = self.getDABThresholdMask(hed, margins=margins)
-        #mask = self.performOpen(self.performClose(mask))
-        #mask = self.performClose(mask)
-        mask = self.performDilation(mask)
 
-        return mask
-
-    def getGTmask(self, coords, dims=(256,256), level=1, fill_val=1):
+    def getGTmask(self, coords, dims=(512,512), level=0, fill_val=1):
         if dims=='full':
             dims = self.slide.level_dimensions[level]
 
@@ -418,7 +427,7 @@ class Slide:
 
         return mask
 
-    def getGTMaskedRegion(self, coords, dims=(256,256), level=1, withMaskArea=False):
+    def getGTMaskedRegion(self, coords, dims=(512,512), level=0, withMaskArea=False):
         if dims=='full':
             dims = self.slide.level_dimensions[level]
         img = self.getRegionFromSlide(coords, dims, level)
@@ -427,20 +436,45 @@ class Slide:
 
 
         if withMaskArea:
-            return cv2.addWeighted(img, 0.8, mask_3, 0.4, 0), np.sum(mask)
+            return cv2.addWeighted(img, 0.8, mask_3, 0.4, 0), np.array([np.sum(mask[6:256,6:256]), np.sum(mask[6:256,256:506]), np.sum(mask[256:506,6:256]), np.sum(mask[256:506,256:506])])
         else:
             return cv2.addWeighted(img, 0.8, mask_3, 0.4, 0)
 
-    def getLabel(self, coords, dims=(256,256), level=1):
+    def getLabel(self, coords, dims=(512,512), level=0, quadlabel=False):
         '''
         Return [1.0, 0.0] if the region at the specified rectangulare area (dims) starting at given coordinates (coords) does not have a detection else, 
         return [0.0, 1.0] if the region at the specified rectangulare area (dims) starting at given coordinates (coords) has a detection 
         '''
+        if quadlabel:
+            return self.getLabelQuad(coords, dims, level)
         if self.annotation==None:
             return np.array([1.0, 0.0])
         else:
             detection = np.any(self.getGTmask(coords, dims, level))
             label = np.array( [float(not detection), float(detection)] )
+            return label
+
+    def getLabelQuad(self, coords, dims=(512,512), level=0, margin=6):
+        '''
+        Area of patch within the margin is considered and
+        ground truth is evaluated for 4 equal sized quadrants in the patch.
+        Quad sequence is left to right, top to bottom - in image
+        '''
+        if self.annotation==None:
+            return np.array([0.0, 0.0, 0.0, 0.0])
+        else:
+            quad_dim = (int((dims[0]-2*margin)/2), int((dims[1]-2*margin)/2))
+            scale = self.slide.level_downsamples[level]
+            x, y = [], []
+            for iy in (0,1):
+                for ix in (0,1):
+                    x.append(int(coords[0] + scale*margin + ix*scale*quad_dim[0]))
+                    y.append(int(coords[1] + scale*margin + iy*scale*quad_dim[1]))
+            label = np.array([0,0,0,0], dtype=np.float)
+            for i in range(len(x)):
+                mask = self.getGTmask((x[i], y[i]), quad_dim, level, fill_val=1)
+                area_pc = (100* np.sum(mask)) / (mask.shape[0]*mask.shape[1])
+                label[i] = (1.0 if area_pc>=55 else 0.0)
             return label
 
     def generateROIMasks(self, thresh_method='GRAY', skip_negatives=False, level=None):
@@ -498,7 +532,7 @@ class Slide:
         return l
 
 
-    def getPatchCoordList(self, thresh_method='OTSU', with_filename=True, skip_negatives=False):
+    def getPatchCoordList(self, thresh_method='GRAY', with_filename=True, skip_negatives=False, level=None):
         '''
         Returns a list of coordinates in the slide image where useful data is expected to be present by using 
         thresholding to remove blank or non-informative areas, at the given image level (extraction_level)
@@ -511,7 +545,7 @@ class Slide:
         Following the mask generation, the indices of all values that are non-zero are recorded (with_filename if true) and returned as a list  
         '''
 
-        self.generateROIMasks(thresh_method=thresh_method, skip_negatives=skip_negatives)
+        self.generateROIMasks(thresh_method=thresh_method, skip_negatives=skip_negatives, level=level)
         
         if skip_negatives:
             if self.annotation==None:
@@ -529,14 +563,14 @@ class Slide:
                 self.getNonZeroLocations(self.mask_annotations, with_filename), \
                 self.getNonZeroLocations(self.mask_neighboring, with_filename)]
 
-    def getPatchCoordListWLabels(self, thresh_method='OTSU', with_filename=True, view_level=1, skip_negatives=False):
+    def getPatchCoordListWLabels(self, thresh_method='GRAY', with_filename=True, view_level=0, skip_negatives=False, quadlabel=False):
         if not skip_negatives and self.annotation==None:
             patch_coords_list = self.getPatchCoordList(thresh_method, with_filename)
             assert len(patch_coords_list)==1
             patch_coords_list = patch_coords_list[0]
             return_list = []
             for item in patch_coords_list:
-                return_list.append([item[0], item[1], self.getLabel(item[1], level=view_level).tolist()])
+                return_list.append([item[0], item[1], self.getLabel(item[1], level=view_level, quadlabel=quadlabel).tolist()])
             return [return_list]
 
         else:
@@ -545,11 +579,11 @@ class Slide:
             for patch_coords_list in patch_coords_lists:
                 return_list = []
                 for item in patch_coords_list:
-                    return_list.append([item[0], item[1], self.getLabel(item[1], level=view_level).tolist()])
+                    return_list.append([item[0], item[1], self.getLabel(item[1], level=view_level, quadlabel=quadlabel).tolist()])
                 return_lists.append(return_list)
             return return_lists
 
-    def getTileListWLabels(self, thresh_method='OTSU', view_level=1):
+    def getTileListWLabels(self, thresh_method='GRAY', view_level=0):
         '''
         get Tile and correponding labels list for validation runs - returns only one list (no annotation or neighboring lists)
         '''        
@@ -560,7 +594,7 @@ class Slide:
             label_list.append(self.getLabel(item, level=view_level).tolist())
         return patch_coords_list, label_list
 
-    def getTileList(self, thresh_method=None, view_level=1, extraction_level=5, area=0, patch_size=256, overlap=0.5):
+    def getTileList(self, thresh_method=None, view_level=0, extraction_level=5, area=0, patch_size=512, overlap=0.5):
         '''
         This function returns list of start coordinates of square patches extracted from slide.
         
