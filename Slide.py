@@ -591,7 +591,7 @@ class Slide:
         patch_coords_list = self.getNonZeroLocations(self.mask_whole, with_filename=False)
         label_list = []
         for item in patch_coords_list:
-            label_list.append(self.getLabel(item, level=view_level).tolist())
+            label_list.append(self.getLabelQuad(item, level=view_level).tolist())
         return patch_coords_list, label_list
 
     def getTileList(self, thresh_method=None, view_level=0, extraction_level=5, area=0, patch_size=512, overlap=0.5):

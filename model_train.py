@@ -135,7 +135,7 @@ if __name__ == '__main__':
     else:
         opt = args.optimizer
 
-    model.compile(optimizer=opt, loss='binary_crossentropy', metrics=['categorical_accuracy'])
+    model.compile(optimizer=opt, loss='binary_crossentropy', metrics=['categorical_accuracy', 'accuracy'])
 
     train_generator = patch_generator(args.slides_folder,
                                 train_neg_list, train_true_list, train_neigh_list,
