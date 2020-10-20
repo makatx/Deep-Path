@@ -6,13 +6,43 @@ from tqdm import tqdm
 import json
 
 folder = '/home/mak/PathAI/slides/train/'
-slides_list = '200808_slide_label_train_list.json'
+
+'''
+slides_list = 'slide_lists/200808_annotated_slides_TRAIN_SET.json'
+filenames = []
+with open(slides_list, 'r') as f:
+    filenames = json.load(f)
+extraction_level = 6
+view_level = 1
+skip_negatives = True
+thresh_method = 'GRAY'
+save_output_to = 'patch_lists/201019_PCL_TmpToProcess_AnnotTrainSet_FractionLabel_L1_EL6_skipNegatives.json'
+'''
+
+'''
+slides_list = 'slide_lists/200808_annotated_slides_TRAIN_SET.json'
+filenames = []
+with open(slides_list, 'r') as f:
+    filenames = json.load(f)
+extraction_level = 10
+view_level = 1
+skip_negatives = False
+thresh_method = 'GRAY'
+save_output_to = 'patch_lists/201019_PCL_TmpToProcess_AnnotTrainSet_FractionLabel_L1_ELmax_WNegatives.json'
+
+
+'''
+
+slides_list = 'slide_lists/200808_slide_label_train_dict.json'
 filenames = []
 with open(slides_list, 'r') as f:
     filenames = json.load(f)['negative']
-#for f in os.listdir(folder):
-#    if f.endswith('.tif'):
-#        filenames.append(f)
+extraction_level = 10
+view_level = 1
+skip_negatives = False
+thresh_method = 'GRAY'
+save_output_to = 'patch_lists/201019_PCL_TmpToProcess_NegativeTrainSet_FractionLabel_L1_ELmax.json'
+
 
 '''
 filenames = ['patient_021_node_3.tif',
@@ -30,11 +60,6 @@ filenames = ['patient_021_node_3.tif',
 pcl_negative = []
 pcl_annot = []
 pcl_neigh = []
-extraction_level = 7
-view_level = 1
-skip_negatives = False
-thresh_method = 'OTSU'
-save_output_to = 'patch_lists/200809_negatively_labeled_trainset_slides_patchList_op.json'
 
 for filename in tqdm(filenames):
     prefix, _ = os.path.splitext(filename)

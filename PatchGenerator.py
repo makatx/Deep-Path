@@ -14,8 +14,9 @@ def patch_generator(folder, negatives_patch_list,
                     neighboring_patch_list, 
                     batch_size=64,
                     sample_factor=1, levels=[1],
-                    dims=(256,5256),
-                    save_labels=False, labels_list=None, train_mode=True):
+                    dims=(256,256),
+                    save_labels=False, labels_list=None, train_mode=True,
+                    classification_thresh=0):
     '''
     Returns (via yields) the sample image patch and corresponding ground truth mask, in given batch_size, using
     one level in levels list per patch with equal probability
@@ -85,7 +86,7 @@ def patch_generator(folder, negatives_patch_list,
                 if train_mode:
                     brightness = (0.95 + np.random.rand()*(1.05-0.95)) if np.random.rand() > 0.5 else 1
 
-                    dims_factor = (0.9 + np.random.rand()*(1.-0.9)) if np.random.rand() > 0.5 else 1
+                    dims_factor = 1 #(0.9 + np.random.rand()*(1.-0.9)) if np.random.rand() > 0.5 else 1
                     zoom_dims = int(dims[0] / dims_factor)
 
                     flip_v = np.random.rand() > 0.5
@@ -106,11 +107,17 @@ def patch_generator(folder, negatives_patch_list,
                 patch.append(patch_img)
 
                 if len(sample) == 3:
-                    ground_truth.append(np.array(sample[2]))
+                    op = np.array(sample[2])
+                    if classification_thresh == 0:
+                        ground_truth.append(op)
+                    else:
+                        ground_truth.append(np.array(1.0 if op>=classification_thresh else 0.0))
                 else:
-                    ground_truth.append(slide.getLabel(coords,(zoom_dims, zoom_dims), level))
-
-                #print('Level used: {}'.format(level))
+                    op = slide.getLabel(coords,(zoom_dims, zoom_dims), level)
+                    if classification_thresh == 0:
+                        ground_truth.append(op)
+                    else:
+                        ground_truth.append(np.array(1.0 if op>=classification_thresh else 0.0))
 
             X_train = np.array(patch)
 

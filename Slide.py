@@ -443,6 +443,17 @@ class Slide:
             label = np.array( [float(not detection), float(detection)] )
             return label
 
+    def getLabelArea(self, coords, dims=(256,256), level=1):
+        '''
+        Returns area fraction of the detection 
+        '''
+        if self.annotation==None:
+            return 0.0
+        else:
+            mask = self.getGTmask(coords, dims, level)
+            area = np.sum(mask)
+            return area / (dims[0]*dims[1])
+
     def generateROIMasks(self, thresh_method='GRAY', skip_negatives=False, level=None):
         '''
         Calculate and store as object variables: 
@@ -536,7 +547,7 @@ class Slide:
             patch_coords_list = patch_coords_list[0]
             return_list = []
             for item in patch_coords_list:
-                return_list.append([item[0], item[1], self.getLabel(item[1], level=view_level).tolist()])
+                return_list.append([item[0], item[1], self.getLabelArea(item[1], level=view_level)])
             return [return_list]
 
         else:
@@ -545,7 +556,7 @@ class Slide:
             for patch_coords_list in patch_coords_lists:
                 return_list = []
                 for item in patch_coords_list:
-                    return_list.append([item[0], item[1], self.getLabel(item[1], level=view_level).tolist()])
+                    return_list.append([item[0], item[1], self.getLabelArea(item[1], level=view_level)])
                 return_lists.append(return_list)
             return return_lists
 

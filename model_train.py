@@ -52,6 +52,7 @@ if __name__ == '__main__':
     aparser.add_argument('--decay-lr', type=bool, default=False, help='Optimizer to use (default parameters)')
     aparser.add_argument('--train-level', choices=[0,1], type=int, default=1, help='the slide/zoom level the network should train on')
     aparser.add_argument('--slides-folder', type=str, default='', help='Path of the slides folder. Should be empty (or not set) if patch coord list (json) already has this')
+    aparser.add_argument('--classification-thresh', type=float, default=0, help='Value between 0 and 1. \nif "0", network will regress to detection area fraction, \n otherwise, this value is used to determine what percent of the detection area is considered as a positive label. (MSE/Binary cross entropy used for Regresssion/Classification respectively)')
 
     args = aparser.parse_args()
 
@@ -83,8 +84,8 @@ if __name__ == '__main__':
     print('\nModel to be saved as:\n',
     'modelsaves/'+date+'_' + args.architecture +'_'+saves_name+'_afterEpoch-'+str(epochs)+'.h5')
 
-    if args.nesterov:
-        print("###################### NESTEROV TRUE ###########")
+#    if args.nesterov:
+#        print("###################### NESTEROV TRUE ###########")
     print('Using following patch list json files: \t{}'.format(args.patch_list))
 
     with open(args.patch_list, 'rb') as f:
@@ -134,12 +135,17 @@ if __name__ == '__main__':
     else:
         opt = args.optimizer
 
-    model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['categorical_accuracy'])
+    if args.classification_thresh == 0:
+        print("##############\nModel set to Regression\n##############")
+        model.compile(optimizer=opt, loss='mean_squared_error', metrics=['accuracy'])
+    else:
+        print("##############\nModel set to Classification w/ threshold:\n##############", args.classification_thresh)
+        model.compile(optimizer=opt, loss='binary_crossentropy', metrics=['accuracy'])
 
     train_generator = patch_generator(args.slides_folder,
                                 train_neg_list, train_true_list, train_neigh_list,
                                 sample_factor=sample_factor,
-                                batch_size=batch_size, dims=dims, levels=train_levels)
+                                batch_size=batch_size, dims=dims, levels=train_levels, classification_thresh=args.classification_thresh)
     sublist_size = math.ceil(len(train_true_list)/sample_factor) - len(train_neigh_list)
     sampleset_size_train = len(train_neg_list[:sublist_size]) + len(train_true_list) +len(train_neigh_list)
     steps_per_epoch = math.ceil(sampleset_size_train/batch_size)
@@ -148,7 +154,7 @@ if __name__ == '__main__':
     validn_generator = patch_generator(args.slides_folder,
                                 test_neg_list, test_true_list, test_neigh_list,
                                 sample_factor=sample_factor,
-                                batch_size=batch_size, dims=dims, levels=train_levels)
+                                batch_size=batch_size, dims=dims, levels=train_levels, classification_thresh=args.classification_thresh)
 
     sublist_size = math.ceil(len(test_true_list)/sample_factor) - len(test_neigh_list)
     sampleset_size_validn = len(test_neg_list[:sublist_size]) + len(test_true_list) + len(test_neigh_list)
