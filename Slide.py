@@ -560,7 +560,7 @@ class Slide:
                 return_lists.append(return_list)
             return return_lists
 
-    def getTileListWLabels(self, thresh_method='OTSU', view_level=1):
+    def getTileListWLabels(self, thresh_method='GRAY', view_level=1, areafrac=False):
         '''
         get Tile and correponding labels list for validation runs - returns only one list (no annotation or neighboring lists)
         '''        
@@ -568,7 +568,10 @@ class Slide:
         patch_coords_list = self.getNonZeroLocations(self.mask_whole, with_filename=False)
         label_list = []
         for item in patch_coords_list:
-            label_list.append(self.getLabel(item, level=view_level).tolist())
+            if areafrac:
+                label_list.append(self.getLabelArea(item, level=view_level))
+            else:
+                label_list.append(self.getLabelArea(item, level=view_level).tolist())
         return patch_coords_list, label_list
 
     def getTileList(self, thresh_method=None, view_level=1, extraction_level=5, area=0, patch_size=256, overlap=0.5):

@@ -114,7 +114,7 @@ if __name__ == '__main__':
         print('Loaded weights from {}'.format(load_weights))
 
 
-    checkpointer = ModelCheckpoint(checkpoint_dir+date+'_' + args.architecture +'_'+str(learning_rate)+'_weights_'+saves_name+'_{epoch:02d}--{categorical_accuracy:.4f}--{val_loss:.4f}.hdf5', monitor='categorical_accuracy',
+    checkpointer = ModelCheckpoint(checkpoint_dir+date+'_' + args.architecture +'_'+str(learning_rate)+'_weights_'+saves_name+'_{epoch:02d}--{val_loss:.4f}.hdf5', monitor='accuracy',
                             save_weights_only=True, save_best_only=True)
     csvlogger = CSVLogger(log_dir+'_'+date+'_' + args.architecture +'_'+saves_name+'_fit.log', append=True)
     callbacks = [checkpointer, csvlogger]
@@ -160,8 +160,16 @@ if __name__ == '__main__':
     sampleset_size_validn = len(test_neg_list[:sublist_size]) + len(test_true_list) + len(test_neigh_list)
     steps_per_epoch_validn = math.ceil(sampleset_size_validn/batch_size)
 
-    history = model.fit_generator(train_generator, steps_per_epoch=steps_per_epoch, epochs=epochs, verbose=1, callbacks=callbacks,
-    validation_data=validn_generator, validation_steps=steps_per_epoch_validn, initial_epoch=initial_epoch)
+    try:
+        history = model.fit_generator(train_generator, steps_per_epoch=steps_per_epoch, epochs=epochs, verbose=1, callbacks=callbacks,
+        validation_data=validn_generator, validation_steps=steps_per_epoch_validn, initial_epoch=initial_epoch)
 
-    last_epoch = epochs
-    model.save('modelsaves/'+date+'_' + args.architecture +'_'+saves_name+'_afterEpoch-'+str(last_epoch)+'.h5')
+        last_epoch = epochs
+        model.save('modelsaves/'+date+'_' + args.architecture +'_'+saves_name+'_afterEpoch-'+str(last_epoch)+'.h5')
+
+    except:
+        print(sys.exc_info())
+        last_epoch = epochs
+        model.save('modelsaves/'+date+'_EXC_Occured_' + args.architecture +'_'+saves_name+'_afterEpoch-'+str(last_epoch)+'.h5')
+
+    

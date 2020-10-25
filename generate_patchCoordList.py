@@ -30,9 +30,9 @@ skip_negatives = False
 thresh_method = 'GRAY'
 save_output_to = 'patch_lists/201019_PCL_TmpToProcess_AnnotTrainSet_FractionLabel_L1_ELmax_WNegatives.json'
 
-
 '''
 
+'''
 slides_list = 'slide_lists/200808_slide_label_train_dict.json'
 filenames = []
 with open(slides_list, 'r') as f:
@@ -43,8 +43,8 @@ skip_negatives = False
 thresh_method = 'GRAY'
 save_output_to = 'patch_lists/201019_PCL_TmpToProcess_NegativeTrainSet_FractionLabel_L1_ELmax.json'
 
-
 '''
+
 filenames = ['patient_021_node_3.tif',
 'patient_004_node_4.tif',
 'patient_022_node_3.tif',
@@ -55,7 +55,7 @@ filenames = ['patient_021_node_3.tif',
 'patient_061_node_4.tif',
 'patient_064_node_4.tif',
 'patient_089_node_3.tif']
-'''
+
 
 pcl_negative = []
 pcl_annot = []
