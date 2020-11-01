@@ -107,7 +107,7 @@ if __name__ == '__main__':
         elif args.architecture == 'inceptionv3':
             probs = MIA_InceptionV3(input_patch, num_classes=2)
         elif args.architecture == 'inceptionresnetv2':
-            probs = MIA_InceptionResNetV2(input_patch, num_classes=2)
+            probs = MIA_InceptionResNetV2(input_patch, num_out=2)
         model = Model(input_patch, probs)
     if load_weights != None:
         model.load_weights(load_weights)

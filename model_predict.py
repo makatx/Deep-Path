@@ -52,10 +52,9 @@ if __name__ == '__main__':
     aparser.add_argument('--batch-size', type=int, default=128, help='batch_size to use')
     aparser.add_argument('--slides-list', required=True, type=str, help='full path of json format list of slides to run model on')
     aparser.add_argument('--slides-folder', type=str, default='', help='Path of the slides folder. Should be empty (or not set) if patch coord list (json) already has this')
-    aparser.add_argument('--saves-name', type=str, default='predict_out.json', help='output file. If this file exists, it is used to skip slides recorded in this file already and remainder are added as completed')
     aparser.add_argument('--out-folder', type=str, default='predict_out/', help='output folder. If this files under here exist, it is used to skip slides recorded already and remainder are added as processed and saved.  Expected file name is "slide_name.json"')
     aparser.add_argument('--run-level', choices=[0,1], type=int, default=1, help='the slide/zoom level the network should run on')
-    aparser.add_argument('--patch-extraction-level', choices=[5,6,7], type=int, default=5, help='Level at which to run thresholding (specified by --thresh-method to extract pixels of informational areas on slide. Coordinates of Pixels is used as patch coordinates')
+    aparser.add_argument('--patch-extraction-level', choices=[5,6,7], type=int, default=7, help='Level at which to run thresholding (specified by --thresh-method to extract pixels of informational areas on slide. Coordinates of Pixels is used as patch coordinates')
     aparser.add_argument('--thresh-method', choices=['None', 'OTSU','HED', 'GRAY'], type=str, default='GRAY', help='if \'None\', consecutive tiles are extracted from the image at --train-level with specified --overlap, otherwise specidifed method is used to pick out useful pixels as coordiantes at given extraction_level' )
     aparser.add_argument('--overlap', choices=[0,0.25,0.5,0.75], type=float, default=0.25, help='Overlap between consecutive patches (used if thresh_method is None)')
     aparser.add_argument('--patch-size', choices=[256], type=int, default=256, help='patch_size')
@@ -82,7 +81,7 @@ if __name__ == '__main__':
         elif args.architecture == 'inceptionv3':
             probs = MIA_InceptionV3(input_patch, num_classes=2)
         elif args.architecture == 'inceptionresnetv2':
-            probs = MIA_InceptionResNetV2(input_patch, num_classes=2)
+            probs = MIA_InceptionResNetV2(input_patch, num_out=2)
 
         model = Model(input_patch, probs)
 
@@ -95,6 +94,8 @@ if __name__ == '__main__':
     for file in ls:
         completed_slides.append(os.path.splitext(file)[0])
 
+    complete_count = len(completed_slides)
+
     for slidename in slides_list:
         if slidename in completed_slides: 
             print('Skipping file: ', slidename)
@@ -104,19 +105,14 @@ if __name__ == '__main__':
         tile_list = slide.getTileList(thresh_method=thresh_method, view_level=args.run_level, extraction_level=args.patch_extraction_level, area=area, patch_size=dims[0], overlap=args.overlap)
         gen = patch_batch_generator(slide, tile_list, batch_size=args.batch_size, level=args.run_level, dims=dims)
 
+        print("\nCompleted {} of {}".format(complete_count, len(slides_list)))
         print("Running on:", slidename)
         predictions = model.predict_generator(gen, ceil(len(tile_list)/args.batch_size), verbose=1)
 
-        '''
-        slides_predictions[slidename] = list(zip(tile_list, predictions.tolist()))
-
-        ## Save after every slide's patch prediction to safeguard against interruptions
-        with open(args.saves_name, 'w') as f:
-            json.dump(slides_predictions, f)
-        '''
         save_name = slidename + '.json'
         with open(args.out_folder+save_name, 'w') as f:
-            json.dump({slidename:list(zip(tile_list, predictions.tolist()))}, f) 
+            json.dump({slidename:list(zip(tile_list, predictions.tolist()))}, f)
+        complete_count += 1
 
 
 

@@ -16,7 +16,7 @@ def patch_generator(folder, negatives_patch_list,
                     sample_factor=1, levels=[1],
                     dims=(256,256),
                     save_labels=False, labels_list=None, train_mode=True,
-                    classification_thresh=0):
+                    classification_thresh=0.6):
     '''
     Returns (via yields) the sample image patch and corresponding ground truth mask, in given batch_size, using
     one level in levels list per patch with equal probability
@@ -108,16 +108,10 @@ def patch_generator(folder, negatives_patch_list,
 
                 if len(sample) == 3:
                     op = np.array(sample[2])
-                    if classification_thresh == 0:
-                        ground_truth.append(op)
-                    else:
-                        ground_truth.append(np.array(1.0 if op>=classification_thresh else 0.0))
+                    ground_truth.append([op, np.array(1.0 if op>=classification_thresh else 0.0)])
                 else:
                     op = slide.getLabel(coords,(zoom_dims, zoom_dims), level)
-                    if classification_thresh == 0:
-                        ground_truth.append(op)
-                    else:
-                        ground_truth.append(np.array(1.0 if op>=classification_thresh else 0.0))
+                    ground_truth.append([op, np.array(1.0 if op>=classification_thresh else 0.0)])
 
             X_train = np.array(patch)
 
