@@ -10,20 +10,21 @@ import math
 
 class FeatureExtractor:
     '''
-    Objects of this class take in a Slide object and its probability map (coordinate/probability list) and creates masks at
+    Objects of this class take in a Slide object and its probability map (coordinate/area-probability list) and creates masks at
     specified level, from where it provides the ability to indentify clusters, masks of those clusters and also, features of
     those clusters.
     '''
-    def __init__(self, slide, extraction_level, probability_map=None, threshold=0.9):
+    def __init__(self, slide, extraction_level, probability_map=None, threshold=0.2, skipFeatures=False):
         self.slide = slide
         self.extraction_level = extraction_level if extraction_level < slide.slide.level_count else slide.slide.level_count-1
         self.pmap = probability_map
         self.threshold = threshold
         self.mask = self.createMaskfromAnnot() if probability_map==None else self.createMaskfromPMap()
-        self.cluster_masks = []
-        self.evaluateClusters()
-        self.createClusterMasks()
-        self.extractFeatures()
+        if not skipFeatures:
+            self.cluster_masks = []
+            self.evaluateClusters()
+            self.createClusterMasks()
+            self.extractFeatures()
 
 
     def createMaskfromAnnot(self):
@@ -44,7 +45,7 @@ class FeatureExtractor:
         for coord_l0, score in self.pmap:
             coord = [int(coord_l0[0]/coord_scale), int(coord_l0[1]/coord_scale)]
 
-            mask[coord[1]:coord[1]+scaled_dim, coord[0]:coord[0]+scaled_dim] += score[1]
+            mask[coord[1]:coord[1]+scaled_dim, coord[0]:coord[0]+scaled_dim] += score[0]
             mask_counter[coord[1]:coord[1]+scaled_dim, coord[0]:coord[0]+scaled_dim] += 1
 
         mask_counter[mask_counter==0] =1
@@ -670,5 +671,5 @@ class Slide:
 
         return np.array([XYmin, XYmax])
         
-    def instantiateFeatureExtractor(self, extraction_level=5, probability_map=None, threshold=0.9):
-        self.fe = FeatureExtractor(slide=self, extraction_level=extraction_level, probability_map=probability_map, threshold=threshold)
+    def instantiateFeatureExtractor(self, extraction_level=5, probability_map=None, threshold=0.2, skipFeatures=False):
+        self.fe = FeatureExtractor(slide=self, extraction_level=extraction_level, probability_map=probability_map, threshold=threshold, skipFeatures=skipFeatures)

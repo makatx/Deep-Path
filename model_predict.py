@@ -99,13 +99,16 @@ if __name__ == '__main__':
     for slidename in slides_list:
         if slidename in completed_slides: 
             print('Skipping file: ', slidename)
+            complete_count += 1
+            continue
+        elif not os.path.exists(args.slides_folder+slidename):
+            print("Could not find ", slidename)
             continue
 
         slide = Slide(args.slides_folder+slidename)
         tile_list = slide.getTileList(thresh_method=thresh_method, view_level=args.run_level, extraction_level=args.patch_extraction_level, area=area, patch_size=dims[0], overlap=args.overlap)
         gen = patch_batch_generator(slide, tile_list, batch_size=args.batch_size, level=args.run_level, dims=dims)
 
-        print("\nCompleted {} of {}".format(complete_count, len(slides_list)))
         print("Running on:", slidename)
         predictions = model.predict_generator(gen, ceil(len(tile_list)/args.batch_size), verbose=1)
 
@@ -113,6 +116,7 @@ if __name__ == '__main__':
         with open(args.out_folder+save_name, 'w') as f:
             json.dump({slidename:list(zip(tile_list, predictions.tolist()))}, f)
         complete_count += 1
+        print("\nCompleted {} of {}".format(complete_count, len(slides_list)))
 
 
 

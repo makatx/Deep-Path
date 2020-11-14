@@ -25,7 +25,7 @@ FEATURE_ORDER = [
     'slide_area'
 ]
 
-def getXYset(featureset, labels, subset=None):
+def getXYset(featureset, labels, subset=None, shuf=True):
     '''
     Return X_train, y_train list
     params:
@@ -49,18 +49,15 @@ def getXYset(featureset, labels, subset=None):
     X_train, y_train = [], []
 
     for s in slides_list:
-        if labels[s]==0 and np.random.rand()>=2:
-            continue
         fs = featureset[s]
         x = []
         for feature in FEATURE_ORDER:
             x.append(fs[feature])
         X_train.append(x)
-        l = [0,0,0,0]
-        l[labels[s]] = 1
+
         y_train.append(labels[s])
     
-    return shuffle(X_train, y_train)
+    return shuffle(X_train, y_train) if shuf else (X_train, y_train)
 
 def printCM(clf, y_true, X_test, txt='Train'):
     y_pred = clf.predict(X_test)
